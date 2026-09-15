@@ -130,10 +130,10 @@ def process(job):
         stack = []
         for idx, fr in enumerate(frames_iter(inp, W, H)):
             if idx in want:
-                stack.append(fr)
+                stack.append(cv2.resize(fr, (W // 2, H // 2)))
             if idx > max(want):
                 break
-        plate = np.median(np.stack(stack), axis=0).astype(np.uint8)
+        plate = cv2.resize(np.median(np.stack(stack), axis=0).astype(np.uint8), (W, H))
         plate_gray = cv2.cvtColor(plate, cv2.COLOR_BGR2GRAY).astype(int)
         j['stage'] = 'Rebuilding background'
         # PASS 3: composite + encode
@@ -218,7 +218,7 @@ button:disabled{background:#475569;color:#94a3b8}
 .fill{height:100%;width:0%;background:#22c55e;transition:width .3s}
 #msg{min-height:22px;color:#94a3b8} a.dl{display:inline-block;margin-top:10px;background:#3b82f6;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:700}
 </style></head><body>
-<h1>🎬 Video Caption, Watermark, Text & Logo Remover</h1>
+<!-- v2 --><h1>🎬 Video Caption, Watermark, Text & Logo Remover</h1>
 <div class=card>
 <p>Removes burned-in captions, subtitles, title bars, word cards, numbered lists, watermarks, @handles and corner logos. Background rebuilt for real (no blur), audio kept. Works on phone — up to 10 min.</p>
 <input type=file id=f accept=video/*><br>
