@@ -115,9 +115,14 @@ def process(job):
         # PASS 1: masks
         counts = []
         i = 0
+        prev_m = None
         for fr in frames_iter(inp, W, H):
-            m = cv2.resize(text_mask(cv2.resize(fr, (W // 2, H // 2))), (W, H), interpolation=cv2.INTER_NEAREST)
-            m = cv2.dilate(m, np.ones((3, 3), np.uint8))
+            if prev_m is None or i % 2 == 0:
+                m = cv2.resize(text_mask(cv2.resize(fr, (W // 2, H // 2))), (W, H), interpolation=cv2.INTER_NEAREST)
+                m = cv2.dilate(m, np.ones((3, 3), np.uint8))
+                prev_m = m
+            else:
+                m = prev_m
             cv2.imwrite(f"{d}/masks/{i:06d}.png", m)
             counts.append(int(m.sum() // 255)); i += 1
             j['progress'] = int(30 * i / max(1, i + 1)); j['stage'] = f'Scan {i}'
