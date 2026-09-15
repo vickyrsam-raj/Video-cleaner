@@ -59,6 +59,21 @@ def text_mask(img):
             rsz = int(ring.sum())
             if rsz and (hsv[..., 2] < 120)[ring > 0].mean() >= 0.35:
                 m[lab == k] = 255
+    # list names: small bright text in left zone (no dark outline needed)
+    raw = cv2.inRange(hsv, np.array([0, 0, 130]), np.array([179, 255, 255]))
+    raw[:int(img.shape[0] * 0.08), :] = 0
+    raw[int(img.shape[0] * 0.68):, :] = 0
+    raw[:, int(img.shape[1] * 0.32):] = 0
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(raw)
+    for k in range(1, n):
+        a = int(stats[k, cv2.CC_STAT_AREA])
+        hh = int(stats[k, cv2.CC_STAT_HEIGHT])
+        ww = int(stats[k, cv2.CC_STAT_WIDTH])
+        if 20 <= a <= 500 and 5 <= hh <= 18 and ww <= 60:
+            comp = (lab == k).astype(np.uint8)
+            ring = cv2.dilate(comp, np.ones((7, 7), np.uint8)) - comp
+            if ring.sum() and hsv[..., 2][lab == k].mean() >= hsv[..., 2][ring > 0].mean() + 15:
+                m[lab == k] = 255
     # bright small handle on dark bg, bottom center
     raw = cv2.inRange(hsv, np.array([0, 0, 150]), np.array([179, 90, 255]))
     raw[:int(img.shape[0] * 0.80), :] = 0
@@ -120,13 +135,14 @@ def process(job):
         counts = []
         i = 0
         prev_m = None
+        um = np.zeros((H, W), np.uint8)
         for fr in frames_iter(inp, W, H):
             if prev_m is None or i % 2 == 0:
-                m = cv2.resize(text_mask(cv2.resize(fr, (W // 2, H // 2))), (W, H), interpolation=cv2.INTER_NEAREST)
-                m = cv2.dilate(m, np.ones((3, 3), np.uint8))
+                m = text_mask(fr)
                 prev_m = m
             else:
                 m = prev_m
+            um = np.maximum(um, m)
             cv2.imwrite(f"{d}/masks/{i:06d}.png", m)
             counts.append(int(m.sum() // 255)); i += 1
             j['progress'] = int(30 * i / max(1, i + 1)); j['stage'] = f'Scan {i}'
@@ -144,6 +160,9 @@ def process(job):
             if idx > max(want):
                 break
         plate = cv2.resize(np.median(np.stack(stack), axis=0).astype(np.uint8), (W, H))
+        umd = cv2.dilate(um, np.ones((5, 5), np.uint8))
+        if umd.sum() > 0:
+            plate = cv2.inpaint(plate, umd, 5, cv2.INPAINT_TELEA)   # scrub text out of the plate itself
         plate_gray = cv2.cvtColor(plate, cv2.COLOR_BGR2GRAY).astype(int)
         j['stage'] = 'Rebuilding background'
         # PASS 3: composite + encode
@@ -157,6 +176,7 @@ def process(job):
         for i, fr in enumerate(frames_iter(inp, W, H)):
             m = cv2.imread(f"{d}/masks/{i:06d}.png", cv2.IMREAD_GRAYSCALE)
             if m is not None and m.sum() > 0:
+                fr = fr.copy()
                 ys, xs = np.where(m > 0)
                 y1, y2 = max(int(ys.min()) - 20, 0), min(int(ys.max()) + 20, H)
                 x1, x2 = max(int(xs.min()) - 20, 0), min(int(xs.max()) + 20, W)
@@ -199,6 +219,12 @@ def files(name):
         return jsonify({'error': 'not found'}), 404
     return send_file(p, as_attachment=True, download_name=name)
 
+VERSION = 'v8-ui'
+
+@app.route('/ver')
+def ver():
+    return VERSION
+
 @app.route('/upload', methods=['POST'])
 def upload():
     f = request.files.get('video')
@@ -235,43 +261,86 @@ INDEX = """<!doctype html><html><head><meta name=viewport content="width=device-
 <meta name="keywords" content="video caption remover, watermark remover, remove subtitles from video, tiktok caption remover, youtube shorts cleaner, free video editor online">
 <meta name="robots" content="index,follow">
 <meta property="og:title" content="Free Video Caption & Watermark Remover Online">
-<meta property="og:description" content="Remove captions, watermarks & text from any video free. Works on phone."><style>
-body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px;display:flex;flex-direction:column;align-items:center}
-h1{font-size:22px} .card{background:#1e293b;border-radius:16px;padding:24px;width:min(480px,92vw);text-align:center}
-input[type=file]{margin:12px 0} button{background:#22c55e;color:#052e16;border:0;border-radius:10px;padding:12px 22px;font-size:16px;font-weight:700}
-button:disabled{background:#475569;color:#94a3b8}
-.bar{height:12px;background:#334155;border-radius:6px;overflow:hidden;margin:14px 0}
-.fill{height:100%;width:0%;background:#22c55e;transition:width .3s}
-#msg{min-height:22px;color:#94a3b8} a.dl{display:inline-block;margin-top:10px;background:#3b82f6;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:700}
+<meta property="og:description" content="Remove captions, watermarks & text from any video free. Works on phone.">
+<style>
+*{box-sizing:border-box} body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f1f5f9;color:#0f172a;margin:0}
+header{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);position:sticky;top:0;z-index:5}
+.nav{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:6px;padding:10px 14px}
+.logo{font-weight:800;font-size:17px;margin-right:auto}
+.nav button{border:0;background:#e2e8f0;color:#0f172a;border-radius:999px;padding:9px 16px;font-size:14px;font-weight:600}
+.nav button.on{background:#2563eb;color:#fff}
+main{max-width:760px;margin:0 auto;padding:16px 14px 40px}
+.card{background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.07);padding:20px;margin-bottom:14px}
+h1{font-size:21px;margin:0 0 6px} h2{font-size:17px;margin:0 0 8px} p.sub{color:#64748b;margin:0 0 14px;font-size:14px}
+input[type=file]{margin:8px 0;width:100%}
+button.go{width:100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:700}
+button.go:disabled{background:#94a3b8}
+.bar{height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;margin:14px 0 8px}
+.fill{height:100%;width:0%;background:#16a34a;transition:width .3s}
+#msg{min-height:20px;color:#64748b;font-size:14px}
+a.dl{display:inline-block;margin-top:10px;background:#2563eb;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:700}
+.plans{display:flex;gap:12px;flex-wrap:wrap}
+.plan{flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:12px;padding:16px}
+.plan.pro{border:2px solid #2563eb;background:#eff6ff}
+.price{font-size:22px;font-weight:800} .per{color:#64748b;font-size:13px}
+ul{margin:8px 0;padding-left:20px;font-size:14px;color:#334155}
+.amber{background:#f59e0b;color:#111} .green{background:#25d366;color:#111}
+.small{font-size:13px;color:#64748b} footer{text-align:center;color:#94a3b8;font-size:12px;padding:20px}
+.hide{display:none}
 </style></head><body>
-<!-- v2 --><h1>🎬 Video Caption, Watermark, Text & Logo Remover</h1>
+<header><div class=nav>
+<span class=logo>🎬 VideoCleaner</span>
+<button id=t1 class=on onclick="show(1)">Clean</button>
+<button id=t2 onclick="show(2)">Plans & Billing</button>
+<button id=t3 onclick="show(3)">Help</button>
+</div></header>
+<main>
+<section id=s1>
 <div class=card>
-<p>Removes burned-in captions, subtitles, title bars, word cards, numbered lists, watermarks, @handles and corner logos. Background rebuilt for real (no blur), audio kept. Works on phone — up to 10 min.</p>
-<input type=file id=f accept=video/*><br>
-<button id=go onclick=up()>Remove captions</button>
+<h1>Remove captions, watermarks & text from video</h1>
+<p class=sub>Real background rebuild — no blur. Audio kept. Works on phone. Free: 3 videos/day.</p>
+<input type=file id=f accept=video/*>
+<button class=go id=go onclick=up()>🧹 Remove captions now</button>
 <div class=bar><div class=fill id=fill></div></div>
 <div id=msg>Pick a video (up to 10 min).</div>
 <div id=dl></div>
 </div>
-<div class=card style="margin-top:16px">
-<h2 style="font-size:18px;margin:0 0 10px">⭐ Plans</h2>
-<p style="color:#94a3b6;margin:0 0 10px">FREE = 3 videos/day. PRO = unlimited (₹49/month).</p>
-<a class=dl style="background:#f59e0b;color:#111" href="upi://pay?pa=UPI_PLACEHOLDER&pn=VideoCleaner&am=49&cu=INR">📲 Pay ₹49 via UPI</a>
-<a class=dl style="background:#25d366;color:#111" href="https://wa.me/WA_PLACEHOLDER">💬 WhatsApp screenshot → get PRO code</a>
-<p style="margin:10px 0 0"><a href="#" style="color:#94a3b6" onclick="pro();return false">Have a PRO code? Enter it</a></p>
-</div>
-<div class=card style="margin-top:16px">
-<h2 style="font-size:18px;margin:0 0 10px">📁 Your clean videos (tap to download)</h2>
-<!--LIST-->
-</div>
+<div class=card><h2>📁 Finished videos on this device</h2><!--LIST--></div>
+</section>
+<section id=s2 class=hide>
+<div class=plans>
+<div class=plan><h2>Free</h2><div class=price>₹0</div><div class=per>forever</div>
+<ul><li>3 videos per day</li><li>All caption colours</li><li>Audio kept</li></ul></div>
+<div class=plan pro><h2>PRO ⭐</h2><div class=price>₹49</div><div class=per>per month</div>
+<ul><li>Unlimited videos</li><li>Priority support</li><li>Perfect-clean requests</li></ul>
+<a class=dl amber href="upi://pay?pa=UPI_PLACEHOLDER&pn=VideoCleaner&am=49&cu=INR">📲 Pay ₹49 via UPI</a><br>
+<a class=dl green href="https://wa.me/WA_PLACEHOLDER">💬 WhatsApp screenshot → get code</a>
+<p class=small style="margin-top:10px"><a href="#" onclick="pro();return false">Have a PRO code? Enter it</a></p>
+</div></div>
+<p class=sub>Payments go directly to the owner's UPI. No middlemen.</p>
+</section>
+<section id=s3 class=hide>
+<div class=card><h2>How it works</h2>
+<ul><li>Upload a video — it never leaves the server longer than processing.</li>
+<li>We detect burned-in text (captions, titles, lists, watermarks, handles, logos).</li>
+<li>The background behind the text is rebuilt for real — not blurred.</li>
+<li>Download your clean video. Audio untouched.</li></ul></div>
+<div class=card><h2>Tips for best results</h2>
+<ul><li>Shorts & reels (under 2 min) clean fastest.</li>
+<li>Colourful or white captions with dark outlines clean perfectly.</li>
+<li>Very tiny or transparent logos may leave a faint shadow.</li></ul></div>
+</section>
+</main>
+<footer>VideoCleaner — free forever for personal use.</footer>
 <script>
-function pro(){const c=prompt('Enter your PRO code');if(c){localStorage.setItem('pro',c);msg.textContent='PRO active ✔ unlimited';}}
+function show(n){for(let i=1;i<4;i++){document.getElementById('s'+i).classList.toggle('hide',i!=n);document.getElementById('t'+i).classList.toggle('on',i==n);}}
+function pro(){const c=prompt('Enter your PRO code');if(c){localStorage.setItem('pro',c);show(1);msg.textContent='PRO active ✔ unlimited';}}
 async function up(){
  const fd=new FormData(); fd.append('video',f.files[0]);
  go.disabled=true; msg.textContent='Uploading...';
  const r=await fetch('/upload',{method:'POST',body:fd,headers:{'X-PRO':localStorage.getItem('pro')||''}});
  const j=await r.json();
- if(r.status==429){go.disabled=false;msg.textContent=j.error+' ⭐ Go PRO below.';return;}
+ if(r.status==429){go.disabled=false;msg.textContent=j.error+' ⭐ See Plans & Billing.';return;}
  poll(j.job);
 }
 function poll(job){
@@ -280,10 +349,11 @@ function poll(job){
   fill.style.width=j.progress+'%'; msg.textContent=j.stage||j.status;
   if(j.status=='done'){clearInterval(t);go.disabled=false;
     dl.innerHTML='<a class=dl href="/download/'+job+'">⬇ Download CLEAN_VIDEO.mp4</a>';}
-  if(j.status=='error'){clearInterval(t);go.disabled=false;}
+  if(j.status=='error'){clearInterval(t);go.disabled=false;msg.textContent=j.stage;}
  },700);
 }
 </script></body></html>"""
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), threaded=True)
