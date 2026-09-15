@@ -1,0 +1,4 @@
+flask
+numpy
+opencv-python-headless
+imageio-ffmpeg
