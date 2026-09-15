@@ -1,4 +1,5 @@
 import os, re, time, glob, subprocess, threading, uuid
+from datetime import date
 import numpy as np, cv2
 from flask import Flask, request, jsonify, send_file, Response
 
@@ -13,6 +14,9 @@ def ffmpeg_bin():
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 JOBS = {}
+USAGE = {}
+FREE_LIMIT = int(os.environ.get('FREE_LIMIT', '3'))
+PRO_CODES = set(os.environ.get('PRO_CODES', 'SAMFREE2026').split(','))
 
 RANGES = {
   'yellow': [((22, 180, 180), (38, 255, 255))],
@@ -199,6 +203,12 @@ def upload():
     f = request.files.get('video')
     if not f:
         return jsonify({'error': 'no video'}), 400
+    code = request.headers.get('X-PRO', '')
+    if code not in PRO_CODES:
+        key = (date.today().isoformat(), request.remote_addr)
+        if USAGE.get(key, 0) >= FREE_LIMIT:
+            return jsonify({'error': f'Free limit: {FREE_LIMIT} videos/day. Go PRO for unlimited.'}), 429
+        USAGE[key] = USAGE.get(key, 0) + 1
     job = uuid.uuid4().hex[:8]
     d = f'/tmp/job_{job}'; os.makedirs(d + '/masks', exist_ok=True)
     f.save(d + '/in.mp4')
@@ -219,7 +229,12 @@ def download(job):
     return send_file(j['dir'] + '/out.mp4', as_attachment=True, download_name='CLEAN_VIDEO.mp4')
 
 INDEX = """<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Video Caption, Watermark, Text & Logo Remover</title><style>
+<title>Free Video Caption, Watermark, Text & Logo Remover Online – No App Needed</title>
+<meta name="description" content="Free online video caption, subtitle, watermark, text and logo remover. No app, no signup. Works on phone. Real background rebuild, audio kept.">
+<meta name="keywords" content="video caption remover, watermark remover, remove subtitles from video, tiktok caption remover, youtube shorts cleaner, free video editor online">
+<meta name="robots" content="index,follow">
+<meta property="og:title" content="Free Video Caption & Watermark Remover Online">
+<meta property="og:description" content="Remove captions, watermarks & text from any video free. Works on phone."><style>
 body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px;display:flex;flex-direction:column;align-items:center}
 h1{font-size:22px} .card{background:#1e293b;border-radius:16px;padding:24px;width:min(480px,92vw);text-align:center}
 input[type=file]{margin:12px 0} button{background:#22c55e;color:#052e16;border:0;border-radius:10px;padding:12px 22px;font-size:16px;font-weight:700}
@@ -238,19 +253,24 @@ button:disabled{background:#475569;color:#94a3b8}
 <div id=dl></div>
 </div>
 <div class=card style="margin-top:16px">
-<h2 style="font-size:18px;margin:0 0 10px">❤️ Enjoyed it? Support this free tool</h2>
-<p style="color:#94a3b6;margin:0 0 10px">If this saved you money, send any small amount on UPI 🙏</p>
-<a class=dl style="background:#f59e0b;color:#111" href="upi://pay?pa=UPI_PLACEHOLDER&pn=VideoCleaner&cu=INR">📲 Pay via UPI</a>
+<h2 style="font-size:18px;margin:0 0 10px">⭐ Plans</h2>
+<p style="color:#94a3b6;margin:0 0 10px">FREE = 3 videos/day. PRO = unlimited (₹49/month).</p>
+<a class=dl style="background:#f59e0b;color:#111" href="upi://pay?pa=UPI_PLACEHOLDER&pn=VideoCleaner&am=49&cu=INR">📲 Pay ₹49 via UPI</a>
+<a class=dl style="background:#25d366;color:#111" href="https://wa.me/WA_PLACEHOLDER">💬 WhatsApp screenshot → get PRO code</a>
+<p style="margin:10px 0 0"><a href="#" style="color:#94a3b6" onclick="pro();return false">Have a PRO code? Enter it</a></p>
 </div>
 <div class=card style="margin-top:16px">
 <h2 style="font-size:18px;margin:0 0 10px">📁 Your clean videos (tap to download)</h2>
 <!--LIST-->
 </div>
 <script>
+function pro(){const c=prompt('Enter your PRO code');if(c){localStorage.setItem('pro',c);msg.textContent='PRO active ✔ unlimited';}}
 async function up(){
  const fd=new FormData(); fd.append('video',f.files[0]);
  go.disabled=true; msg.textContent='Uploading...';
- const r=await fetch('/upload',{method:'POST',body:fd}); const j=await r.json();
+ const r=await fetch('/upload',{method:'POST',body:fd,headers:{'X-PRO':localStorage.getItem('pro')||''}});
+ const j=await r.json();
+ if(r.status==429){go.disabled=false;msg.textContent=j.error+' ⭐ Go PRO below.';return;}
  poll(j.job);
 }
 function poll(job){
