@@ -116,7 +116,8 @@ def process(job):
         counts = []
         i = 0
         for fr in frames_iter(inp, W, H):
-            m = text_mask(fr)
+            m = cv2.resize(text_mask(cv2.resize(fr, (W // 2, H // 2))), (W, H), interpolation=cv2.INTER_NEAREST)
+            m = cv2.dilate(m, np.ones((3, 3), np.uint8))
             cv2.imwrite(f"{d}/masks/{i:06d}.png", m)
             counts.append(int(m.sum() // 255)); i += 1
             j['progress'] = int(30 * i / max(1, i + 1)); j['stage'] = f'Scan {i}'
@@ -152,9 +153,13 @@ def process(job):
                 fg_d = cv2.dilate(fg.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
                 filled = fr.copy(); filled[m > 0] = plate[m > 0]        # real background plate
                 if (fg_d & (m > 0)).sum() > 0.1 * (m > 0).sum():        # person behind text?
-                    telea = cv2.inpaint(fr, m, 8, cv2.INPAINT_TELEA)
-                    sel = fg_d & (m > 0)
-                    filled[sel] = telea[sel]                            # keep person continuous
+                    ys, xs = np.where(m > 0)
+                    y1, y2 = max(int(ys.min()) - 16, 0), min(int(ys.max()) + 16, H)
+                    x1, x2 = max(int(xs.min()) - 16, 0), min(int(xs.max()) + 16, W)
+                    mroi = m[y1:y2, x1:x2]
+                    telea = cv2.inpaint(fr[y1:y2, x1:x2], mroi, 5, cv2.INPAINT_TELEA)
+                    sel = (fg_d & (m > 0))[y1:y2, x1:x2]
+                    filled[y1:y2, x1:x2][sel] = telea[sel]              # keep person continuous
                 mf = cv2.GaussianBlur(m.astype(np.float32) / 255.0, (7, 7), 0)[..., None]
                 fr = (fr * (1 - mf) + filled * mf).astype(np.uint8)
             enc.stdin.write(fr.tobytes())
@@ -226,6 +231,11 @@ button:disabled{background:#475569;color:#94a3b8}
 <div class=bar><div class=fill id=fill></div></div>
 <div id=msg>Pick a video (up to 10 min).</div>
 <div id=dl></div>
+</div>
+<div class=card style="margin-top:16px">
+<h2 style="font-size:18px;margin:0 0 10px">❤️ Enjoyed it? Support this free tool</h2>
+<p style="color:#94a3b6;margin:0 0 10px">If this saved you money, send any small amount on UPI 🙏</p>
+<a class=dl style="background:#f59e0b;color:#111" href="upi://pay?pa=UPI_PLACEHOLDER&pn=VideoCleaner&cu=INR">📲 Pay via UPI</a>
 </div>
 <div class=card style="margin-top:16px">
 <h2 style="font-size:18px;margin:0 0 10px">📁 Your clean videos (tap to download)</h2>
