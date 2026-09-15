@@ -157,20 +157,21 @@ def process(job):
         for i, fr in enumerate(frames_iter(inp, W, H)):
             m = cv2.imread(f"{d}/masks/{i:06d}.png", cv2.IMREAD_GRAYSCALE)
             if m is not None and m.sum() > 0:
-                gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY).astype(int)
-                fg = np.abs(gray - plate_gray) > 45                      # moving stuff (people)
+                ys, xs = np.where(m > 0)
+                y1, y2 = max(int(ys.min()) - 20, 0), min(int(ys.max()) + 20, H)
+                x1, x2 = max(int(xs.min()) - 20, 0), min(int(xs.max()) + 20, W)
+                mroi = m[y1:y2, x1:x2] > 0
+                froi = fr[y1:y2, x1:x2]
+                gray = cv2.cvtColor(froi, cv2.COLOR_BGR2GRAY).astype(int)
+                fg = np.abs(gray - plate_gray[y1:y2, x1:x2]) > 45
                 fg_d = cv2.dilate(fg.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
-                filled = fr.copy(); filled[m > 0] = plate[m > 0]        # real background plate
-                if (fg_d & (m > 0)).sum() > 0.1 * (m > 0).sum():        # person behind text?
-                    ys, xs = np.where(m > 0)
-                    y1, y2 = max(int(ys.min()) - 16, 0), min(int(ys.max()) + 16, H)
-                    x1, x2 = max(int(xs.min()) - 16, 0), min(int(xs.max()) + 16, W)
-                    mroi = m[y1:y2, x1:x2]
-                    telea = cv2.inpaint(fr[y1:y2, x1:x2], mroi, 5, cv2.INPAINT_TELEA)
-                    sel = (fg_d & (m > 0))[y1:y2, x1:x2]
-                    filled[y1:y2, x1:x2][sel] = telea[sel]              # keep person continuous
-                mf = cv2.GaussianBlur(m.astype(np.float32) / 255.0, (7, 7), 0)[..., None]
-                fr = (fr * (1 - mf) + filled * mf).astype(np.uint8)
+                filled = froi.copy(); filled[mroi] = plate[y1:y2, x1:x2][mroi]
+                if (fg_d & mroi).sum() > 0.1 * mroi.sum():
+                    telea = cv2.inpaint(froi, mroi.astype(np.uint8), 5, cv2.INPAINT_TELEA)
+                    sel = fg_d & mroi
+                    filled[sel] = telea[sel]
+                mf = cv2.GaussianBlur(mroi.astype(np.float32), (7, 7), 0)[..., None]
+                fr[y1:y2, x1:x2] = (froi * (1 - mf) + filled * mf).astype(np.uint8)
             enc.stdin.write(fr.tobytes())
             j['progress'] = 30 + int(65 * (i + 1) / N); j['stage'] = f'Cleaning {i+1}/{N}'
         enc.stdin.close(); enc.wait()
@@ -280,7 +281,7 @@ function poll(job){
   if(j.status=='done'){clearInterval(t);go.disabled=false;
     dl.innerHTML='<a class=dl href="/download/'+job+'">⬇ Download CLEAN_VIDEO.mp4</a>';}
   if(j.status=='error'){clearInterval(t);go.disabled=false;}
- },1000);
+ },700);
 }
 </script></body></html>"""
 
