@@ -28,7 +28,7 @@ RANGES = {
 }
 MIN_AREA, MAX_AREA = 8, 12000
 
-def text_mask(img):
+def text_mask(img, zones=True):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     m = np.zeros(img.shape[:2], np.uint8)
     for cname, rs in RANGES.items():
@@ -46,6 +46,9 @@ def text_mask(img):
                     rsz = int(ring.sum())
                     if rsz == 0 or (hsv[..., 2] < 120)[ring > 0].mean() >= 0.5:
                         m[lab == k] = 255
+    if not zones:
+        k = 5 if img.shape[1] < 480 else 9
+        return cv2.dilate(m, np.ones((k, k), np.uint8))
     # left-column rule: dim white list numbers (top 62% of left 13%)
     raw = cv2.inRange(hsv, np.array([0, 0, 140]), np.array([179, 95, 255]))
     raw[int(img.shape[0] * 0.66):, :] = 0
@@ -219,7 +222,7 @@ def files(name):
         return jsonify({'error': 'not found'}), 404
     return send_file(p, as_attachment=True, download_name=name)
 
-VERSION = 'v8-ui'
+VERSION = 'v10-brand'
 
 @app.route('/ver')
 def ver():
@@ -256,11 +259,11 @@ def download(job):
     return send_file(j['dir'] + '/out.mp4', as_attachment=True, download_name='CLEAN_VIDEO.mp4')
 
 INDEX = """<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Free Video Caption, Watermark, Text & Logo Remover Online – No App Needed</title>
+<title>CaptionRemover.io – Free Video Caption, Watermark & Text Remover Online</title>
 <meta name="description" content="Free online video caption, subtitle, watermark, text and logo remover. No app, no signup. Works on phone. Real background rebuild, audio kept.">
 <meta name="keywords" content="video caption remover, watermark remover, remove subtitles from video, tiktok caption remover, youtube shorts cleaner, free video editor online">
 <meta name="robots" content="index,follow">
-<meta property="og:title" content="Free Video Caption & Watermark Remover Online">
+<meta property="og:title" content="CaptionRemover.io – Free Video Caption & Watermark Remover">
 <meta property="og:description" content="Remove captions, watermarks & text from any video free. Works on phone.">
 <style>
 *{box-sizing:border-box} body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f1f5f9;color:#0f172a;margin:0}
@@ -289,7 +292,7 @@ ul{margin:8px 0;padding-left:20px;font-size:14px;color:#334155}
 .hide{display:none}
 </style></head><body>
 <header><div class=nav>
-<span class=logo>🎬 VideoCleaner</span>
+<span class=logo>🎬 CaptionRemover.io</span>
 <button id=t1 class=on onclick="show(1)">Clean</button>
 <button id=t2 onclick="show(2)">Plans & Billing</button>
 <button id=t3 onclick="show(3)">Help</button>
@@ -331,7 +334,7 @@ ul{margin:8px 0;padding-left:20px;font-size:14px;color:#334155}
 <li>Very tiny or transparent logos may leave a faint shadow.</li></ul></div>
 </section>
 </main>
-<footer>VideoCleaner — free forever for personal use.</footer>
+<footer>CaptionRemover.io — free forever for personal use.</footer>
 <script>
 function show(n){for(let i=1;i<4;i++){document.getElementById('s'+i).classList.toggle('hide',i!=n);document.getElementById('t'+i).classList.toggle('on',i==n);}}
 function pro(){const c=prompt('Enter your PRO code');if(c){localStorage.setItem('pro',c);show(1);msg.textContent='PRO active ✔ unlimited';}}
